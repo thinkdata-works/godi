@@ -1,0 +1,628 @@
+// MIT License
+
+// Copyright (c) 2019 GoLobby
+
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+// original source code: github.com/golobby/container
+package di
+
+import (
+	"errors"
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+type Shape interface {
+	SetArea(int)
+	GetArea() int
+}
+
+type Circle struct {
+	a int
+}
+
+func (c *Circle) SetArea(a int) {
+	c.a = a
+}
+
+func (c Circle) GetArea() int {
+	return c.a
+}
+
+type TypeC struct {
+	val int
+}
+
+type TypeB struct {
+	c TypeC `di:"type"`
+}
+
+type TypeA struct {
+	b *TypeB `di:"type"`
+}
+
+func (t *TypeA) DoSomething() {
+	t.b.c.val *= 2
+}
+
+type ValueC struct {
+	val int
+}
+
+type ValueB struct {
+	c ValueC `di:"type"`
+}
+
+type ValueA struct {
+	b ValueB `di:"type"`
+}
+
+type Database interface {
+	Connect() bool
+}
+
+type MySQL struct{}
+
+func (m MySQL) Connect() bool {
+	return true
+}
+
+func TestInjector_Singleton(t *testing.T) {
+	var injector = NewInjector()
+	injector.verbose = 1
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Singleton(func() (Shape, error) {
+		return &Circle{a: 13}, nil
+	})
+	injector.Singleton(func() *TypeB {
+		return &TypeB{}
+	})
+	injector.Singleton(func() *TypeA {
+		a := &TypeA{}
+		injector.Fill(&a)
+		return a
+	})
+	injector.Call(func(s1 Shape) {
+		s1.SetArea(42)
+	})
+	injector.Call(func(s2 Shape) {
+		a := s2.GetArea()
+		assert.Equal(t, 42, a)
+	})
+
+	// test that they are instantiated lazily
+	wasCalled := false
+	injector.Singleton(func() Database {
+		wasCalled = true
+		return &MySQL{}
+	})
+	assert.Equal(t, false, wasCalled)
+	injector.Call(func(db Database) {
+		assert.Equal(t, true, wasCalled)
+	})
+}
+
+func TestInjector_Singleton_Fail(t *testing.T) {
+	var injector = NewInjector()
+	errorCount := 0
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+		errorCount++
+	})
+	injector.Singleton(func() {}) // no return values should produce an error
+	assert.Equal(t, 1, errorCount)
+	injector.Singleton(func() TypeC { return TypeC{} }) // must return a reference type
+	assert.Equal(t, 2, errorCount)
+	injector.Singleton(func() string { return "test-string" }) // must return a reference type
+	assert.Equal(t, 3, errorCount)
+	injector.Singleton("STRING!") // must receive a function
+	assert.Equal(t, 4, errorCount)
+	injector.Singleton(func(i int) *TypeC { return &TypeC{} }) // must receive a function with no args
+	assert.Equal(t, 5, errorCount)
+	injector.Singleton(func() *TypeC { return nil }) // must not return nil
+	injector.Call(func(t *TypeC) {})
+	assert.Equal(t, 6, errorCount)
+	injector.Singleton(func() (*TypeC, error) { return nil, fmt.Errorf("err") }) // provider returned an error
+	injector.Call(func(t *TypeC) {})
+	assert.Equal(t, 7, errorCount)
+}
+
+func TestInjector_NamedSingleton(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.NamedSingleton("theCircle", func() Shape {
+		return &Circle{a: 13}
+	})
+
+	var sh Shape
+	injector.NamedResolve(&sh, "theCircle")
+	assert.Equal(t, 13, sh.GetArea())
+}
+
+func TestInjector_Instance(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Instance(func() Shape {
+		return &Circle{a: 42}
+	})
+	injector.Call(func(s1 Shape) {
+		s1.SetArea(13)
+	})
+	injector.Call(func(s2 Shape) {
+		a := s2.GetArea()
+		assert.Equal(t, 42, a)
+	})
+
+	injector.Instance(func() TypeC {
+		return TypeC{val: 42}
+	})
+	injector.Instance(func() *TypeB {
+		b := &TypeB{}
+		injector.Fill(&b)
+		return b
+	})
+	injector.Instance(func() *TypeA {
+		a := &TypeA{}
+		injector.Fill(&a)
+		return a
+	})
+	injector.Call(func(a *TypeA) {
+		assert.NotNil(t, a)
+		assert.NotNil(t, a.b)
+		assert.NotNil(t, a.b.c)
+		assert.EqualValues(t, a.b.c.val, 42)
+		a.DoSomething()
+	})
+
+	injector.Reset()
+	injector.Instance(func() TypeC {
+		return TypeC{val: 42}
+	})
+	injector.Instance(func() *TypeB {
+		t := &TypeB{}
+		injector.Fill(t)
+		return t
+	})
+	injector.Instance(func() (*TypeA, error) {
+		t := &TypeA{}
+		injector.Fill(t)
+		return t, nil
+	})
+	a := &TypeA{}
+	injector.Resolve(&a)
+	assert.NotNil(t, a.b)
+	assert.NotNil(t, a.b.c)
+	assert.EqualValues(t, a.b.c.val, 42)
+}
+
+func TestInjector_Instance_With_Resolve_That_Returns_Error(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Instance(func() (Shape, error) {
+		return nil, errors.New("test error")
+	})
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+	var s Shape
+	injector.Resolve(&s)
+	assert.Nil(t, s)
+
+	injector.Call(func(s Shape) {
+		assert.Fail(t, "this should not execute")
+	})
+}
+
+func TestInjector_Instance_With_Resolve_With_Invalid_Signature_It_Should_Fail(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+	injector.Instance(func() (Shape, Database, error) {
+		return nil, nil, nil
+	})
+	var s Shape
+	injector.Resolve(&s)
+	assert.Nil(t, s)
+}
+
+func TestInjector_NamedInstance(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.NamedInstance("theCircle", func() Shape {
+		return &Circle{a: 13}
+	})
+
+	var sh Shape
+	injector.NamedResolve(&sh, "theCircle")
+	assert.Equal(t, 13, sh.GetArea())
+}
+
+func TestInjector_Call_With_Multiple_Resolving(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Singleton(func() Shape {
+		return &Circle{a: 5}
+	})
+	injector.Singleton(func() Database {
+		return &MySQL{}
+	})
+	injector.Call(func(s Shape, m Database) {
+		if _, ok := s.(*Circle); !ok {
+			t.Error("Expected Circle")
+		}
+
+		if _, ok := m.(*MySQL); !ok {
+			t.Error("Expected MySQL")
+		}
+	})
+}
+
+func TestInjector_Call_With_Unsupported_Receiver_It_Should_Fail(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+	injector.Call("STRING!")
+}
+
+func TestInjector_Call_With_Second_UnBounded_Argument(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Singleton(func() Shape {
+		return &Circle{}
+	})
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+	injector.Call(func(s Shape, d Database) {})
+}
+
+func TestInjector_Resolve_With_Reference_As_Resolver(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Singleton(func() Shape {
+		return &Circle{a: 5}
+	})
+
+	injector.Singleton(func() Database {
+		return &MySQL{}
+	})
+
+	var (
+		s Shape
+		d Database
+	)
+
+	injector.Resolve(&s)
+	if _, ok := s.(*Circle); !ok {
+		t.Error("Expected Circle")
+	}
+
+	injector.Resolve(&d)
+	if _, ok := d.(*MySQL); !ok {
+		t.Error("Expected MySQL")
+	}
+}
+
+func TestInjector_Resolve_With_Unsupported_Receiver_It_Should_Fail(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+	injector.Resolve("STRING!")
+
+	str := "STRING!"
+	injector.Resolve(&str)
+}
+
+func TestInjector_Resolve_With_NonReference_Receiver_It_Should_Fail(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+
+	injector.Singleton(func() Shape {
+		return &Circle{a: 5}
+	})
+
+	injector.Singleton(func() *Circle {
+		return &Circle{a: 5}
+	})
+
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+
+	var s Shape
+	injector.Resolve(s)
+	assert.Nil(t, s)
+
+	var c *Circle
+	injector.Resolve(c)
+	assert.Nil(t, c)
+}
+
+func TestInjector_Resolve_With_UnBounded_Reference_It_Should_Fail(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+	var s Shape
+	injector.Resolve(&s)
+}
+
+func TestInjector_Fill_With_Struct_Pointer(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Singleton(func() Shape {
+		return &Circle{a: 5}
+	})
+
+	injector.NamedSingleton("C", func() Shape {
+		return &Circle{a: 5}
+	})
+
+	injector.Singleton(func() Database {
+		return &MySQL{}
+	})
+
+	myApp := struct {
+		S Shape    `di:"type"`
+		D Database `di:"type"`
+		C Shape    `di:"name"`
+		X string
+	}{}
+
+	injector.Fill(&myApp)
+
+	assert.IsType(t, &Circle{}, myApp.S)
+	assert.IsType(t, &MySQL{}, myApp.D)
+
+}
+
+func TestInjector_Fill_With_Struct_Value(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Instance(func() ValueC {
+		return ValueC{val: 5}
+	})
+	injector.Instance(func() ValueB {
+		b := ValueB{}
+		injector.Fill(&b)
+		return b
+	})
+	injector.Instance(func() ValueA {
+		a := ValueA{}
+		injector.Fill(&a)
+		return a
+	})
+
+	struc := struct {
+		a ValueA `di:"type"`
+	}{}
+	injector.Fill(&struc)
+	assert.EqualValues(t, struc.a.b.c.val, 5)
+
+}
+
+func TestInjector_Fill_Unexported_With_Struct_Pointer(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Singleton(func() Shape {
+		return &Circle{a: 5}
+	})
+
+	injector.Singleton(func() Database {
+		return &MySQL{}
+	})
+
+	myApp := struct {
+		s Shape    `di:"type"`
+		d Database `di:"type"`
+		y int
+	}{}
+
+	injector.Fill(&myApp)
+
+	assert.IsType(t, &Circle{}, myApp.s)
+	assert.IsType(t, &MySQL{}, myApp.d)
+
+	injector.Instance(func() TypeC {
+		return TypeC{val: 42}
+	})
+	injector.Instance(func() *TypeB {
+		t := &TypeB{}
+		injector.Fill(t)
+		return t
+	})
+	injector.Instance(func() *TypeA {
+		t := &TypeA{}
+		injector.Fill(t)
+		return t
+	})
+
+	// Should accept pointer
+	a1 := &TypeA{}
+	injector.Fill(a1)
+	assert.NotNil(t, a1.b)
+	assert.NotNil(t, a1.b.c)
+	assert.EqualValues(t, a1.b.c.val, 42)
+
+	// And should accept reference to the pointer
+	a2 := &TypeA{}
+	injector.Fill(&a2)
+	assert.NotNil(t, a2.b)
+	assert.NotNil(t, a2.b.c)
+	assert.EqualValues(t, a2.b.c.val, 42)
+}
+
+func TestInjector_Fill_With_Invalid_Field_It_Should_Fail(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.NamedSingleton("C", func() Shape {
+		return &Circle{a: 5}
+	})
+
+	type App struct {
+		S string `di:"name"`
+	}
+
+	myApp := App{}
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+	injector.Fill(&myApp)
+	assert.EqualValues(t, myApp.S, "")
+}
+
+func TestInjector_Fill_With_Invalid_Tag_It_Should_Fail(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+
+	injector.NamedSingleton("C", func() Shape {
+		return &Circle{a: 5}
+	})
+	type App struct {
+		S string `di:"invalid"`
+	}
+
+	myApp := App{}
+
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+	injector.Fill(&myApp)
+	assert.EqualValues(t, myApp.S, "")
+}
+
+func TestInjector_Fill_With_Invalid_Field_Name_It_Should_Fail(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.NamedInstance("C", func() TypeC {
+		return TypeC{val: 42}
+	})
+	type App struct {
+		S TypeC `di:"name"`
+	}
+
+	myApp := App{}
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+	injector.Fill(&myApp)
+	assert.EqualValues(t, myApp.S.val, 0)
+}
+
+func TestInjector_Fill_With_Invalid_Struct_It_Should_Fail(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Singleton(func() Shape {
+		return &Circle{a: 5}
+	})
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+	invalidStruct := 0
+	injector.Fill(&invalidStruct)
+	assert.EqualValues(t, invalidStruct, 0)
+}
+
+func TestInjector_Fill_With_Invalid_Pointer_It_Should_Fail(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Singleton(func() Shape {
+		return &Circle{a: 5}
+	})
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+
+	var s Shape
+	injector.Fill(s)
+	assert.Nil(t, s)
+}
+
+func TestInjector_Fill_With_With_No_Tags_Should_Fail(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+
+	c := &Circle{}
+	injector.Fill(&c)
+	assert.EqualValues(t, c.a, 0)
+}
+
+func TestInjector_Reset(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+
+	injector.Singleton(func() Shape {
+		return &Circle{a: 5}
+	})
+	injector.Reset()
+
+	injector.SetErrorHandler(func(err error) {
+		assert.Error(t, err)
+	})
+
+	var s Shape
+	injector.Fill(s)
+}
