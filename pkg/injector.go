@@ -1,27 +1,3 @@
-// MIT License
-
-// Copyright (injector) 2019 GoLobby
-
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
-// original source code: github.com/golobby/container
-
 package di
 
 import (
@@ -228,6 +204,35 @@ func (injector *Injector) logDebug(str string) {
 	} else {
 		fmt.Println(injector.getLogPrefix() + str)
 	}
+}
+
+func (injector *Injector) Get(typ reflect.Type, name string) interface{} {
+
+	concrete, exist := injector.bindings[typ][name]
+	if !exist {
+		injector.handleError(fmt.Errorf("no provider found for argument of type `%s`, ensure the type provided matches the return value of the provider", fullyQualifiedTypeString(typ)))
+		return nil
+	}
+
+	instance, err := concrete.resolve(injector)
+	if err != nil {
+		injector.handleError(err)
+		return nil
+	}
+
+	fmt.Println("GETTING!")
+	// if typ.Kind() == reflect.Ptr {
+	fmt.Println("FILLING")
+	err = injector.fill(instance)
+	if err != nil {
+		fmt.Println("derp")
+		injector.handleError(err)
+		return nil
+	}
+	// }
+	fmt.Println("DONE?")
+
+	return instance
 }
 
 // bind maps an abstraction to a concrete and sets an instance if it's a singleton binding.
@@ -590,7 +595,6 @@ func (injector *Injector) fill(structure interface{}) error {
 		defer injector.decrementLoggerIndent()
 	}
 
-	filledFields := 0
 	for i := 0; i < s.NumField(); i++ {
 		f := s.Field(i)
 
@@ -599,6 +603,7 @@ func (injector *Injector) fill(structure interface{}) error {
 			// field has no tag
 			continue
 		}
+
 		var name string
 
 		if t == injectByType {
@@ -626,13 +631,11 @@ func (injector *Injector) fill(structure interface{}) error {
 
 		ptr := reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
 		ptr.Set(reflect.ValueOf(instance))
-		filledFields++
+
+		// recursively fill the field if it's a struct
+		injector.fill(instance)
 	}
 
-	// if no fields were filled, then we should probably return an error
-	if filledFields == 0 {
-		return injector.errorMiddleWare(fmt.Errorf("argument of `%+v` of type `%s` has no fillable fields, ensure at least one field has a `di` tag", structure, fullyQualifiedTypeString(receiverType)))
-	}
 	return nil
 
 }
