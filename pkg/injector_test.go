@@ -139,6 +139,19 @@ func TestInjector_Singleton_Fail(t *testing.T) {
 	injector.Call(func(t *TypeC) {})
 	assert.Equal(t, 7, errorCount)
 }
+func TestInjector_Singleton_Fill(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Singleton(func() Shape {
+		return &Circle{a: 13}
+	})
+
+	var sh Shape
+	injector.Resolve(&sh)
+	assert.Equal(t, 13, sh.GetArea())
+}
 
 func TestInjector_NamedSingleton(t *testing.T) {
 	var injector = NewInjector()
@@ -272,9 +285,6 @@ func TestInjector_Instance(t *testing.T) {
 
 func TestInjector_Instance_With_Resolve_That_Returns_Error(t *testing.T) {
 	var injector = NewInjector()
-	injector.SetErrorHandler(func(err error) {
-		assert.NoError(t, err)
-	})
 	injector.Instance(func() (Shape, error) {
 		return nil, errors.New("test error")
 	})

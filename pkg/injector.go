@@ -220,17 +220,11 @@ func (injector *Injector) Get(typ reflect.Type, name string) interface{} {
 		return nil
 	}
 
-	fmt.Println("GETTING!")
-	// if typ.Kind() == reflect.Ptr {
-	fmt.Println("FILLING")
 	err = injector.fill(instance)
 	if err != nil {
-		fmt.Println("derp")
 		injector.handleError(err)
 		return nil
 	}
-	// }
-	fmt.Println("DONE?")
 
 	return instance
 }
@@ -494,6 +488,13 @@ func (injector *Injector) Resolve(abstraction interface{}) {
 	err := injector.resolve(abstraction, "")
 	if err != nil {
 		injector.handleError(err)
+		return
+	}
+
+	err = injector.fill(abstraction)
+	if err != nil {
+		injector.handleError(err)
+		return
 	}
 }
 
@@ -506,6 +507,13 @@ func (injector *Injector) NamedResolve(abstraction interface{}, name string) {
 	err := injector.resolve(abstraction, name)
 	if err != nil {
 		injector.handleError(err)
+		return
+	}
+
+	err = injector.fill(abstraction)
+	if err != nil {
+		injector.handleError(err)
+		return
 	}
 }
 
@@ -583,6 +591,8 @@ func (injector *Injector) fill(structure interface{}) error {
 				return injector.errorMiddleWare(fmt.Errorf("argument `%+v` of type `%s` is not a struct", structure, fullyQualifiedTypeString(receiverType)))
 			}
 			s = reflect.ValueOf(structure).Elem().Elem()
+		} else if elem.Kind() == reflect.Interface {
+			s = reflect.ValueOf(structure).Elem().Elem().Elem()
 		} else {
 			return injector.errorMiddleWare(fmt.Errorf("argument of `%+v` of type `%s` is not a struct", structure, fullyQualifiedTypeString(receiverType)))
 		}
