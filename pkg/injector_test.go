@@ -1,26 +1,3 @@
-// MIT License
-
-// Copyright (c) 2019 GoLobby
-
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
-// original source code: github.com/golobby/container
 package di
 
 import (
@@ -121,6 +98,21 @@ func TestInjector_Singleton(t *testing.T) {
 	injector.Call(func(db Database) {
 		assert.Equal(t, true, wasCalled)
 	})
+
+	shape := Get[Shape](injector)
+	assert.NotNil(t, shape)
+	assert.Equal(t, 42, shape.GetArea())
+
+	ta := Get[*TypeA](injector)
+	assert.NotNil(t, ta)
+	assert.NotNil(t, ta.b)
+
+	// should handle nil return values without a panic
+	injector.SetErrorHandler(func(err error) {
+		fmt.Println(err.Error())
+		assert.Error(t, err)
+	})
+	Get[TypeA](injector)
 }
 
 func TestInjector_Singleton_Fail(t *testing.T) {
@@ -147,6 +139,19 @@ func TestInjector_Singleton_Fail(t *testing.T) {
 	injector.Call(func(t *TypeC) {})
 	assert.Equal(t, 7, errorCount)
 }
+func TestInjector_Singleton_Fill(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Singleton(func() Shape {
+		return &Circle{a: 13}
+	})
+
+	var sh Shape
+	injector.Resolve(&sh)
+	assert.Equal(t, 13, sh.GetArea())
+}
 
 func TestInjector_NamedSingleton(t *testing.T) {
 	var injector = NewInjector()
@@ -160,6 +165,64 @@ func TestInjector_NamedSingleton(t *testing.T) {
 	var sh Shape
 	injector.NamedResolve(&sh, "theCircle")
 	assert.Equal(t, 13, sh.GetArea())
+}
+
+type IParent interface {
+	GetA() *A
+}
+
+type Parent struct {
+	A *A `di:"type"`
+}
+
+func (a *Parent) GetA() *A {
+	return a.A
+}
+
+type A struct {
+	B *B `di:"type"`
+}
+
+type B struct {
+	C *C `di:"type"`
+}
+
+type C struct {
+	Val int
+}
+
+func TestInjector_FillRecursively(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.Singleton(func() IParent {
+		return &Parent{}
+	})
+	injector.Singleton(func() *A {
+		return &A{}
+	})
+	injector.Singleton(func() *B {
+		return &B{}
+	})
+	injector.Singleton(func() *C {
+		return &C{
+			Val: 123,
+		}
+	})
+
+	p := Get[IParent](injector)
+	assert.NotNil(t, p)
+	assert.NotNil(t, p.GetA())
+	assert.NotNil(t, p.GetA().B)
+	assert.NotNil(t, p.GetA().B.C)
+	assert.Equal(t, 123, p.GetA().B.C.Val)
+
+	a := Get[*A](injector)
+	assert.NotNil(t, a)
+	assert.NotNil(t, a.B)
+	assert.NotNil(t, a.B.C)
+	assert.Equal(t, 123, a.B.C.Val)
 }
 
 func TestInjector_Instance(t *testing.T) {
@@ -222,9 +285,6 @@ func TestInjector_Instance(t *testing.T) {
 
 func TestInjector_Instance_With_Resolve_That_Returns_Error(t *testing.T) {
 	var injector = NewInjector()
-	injector.SetErrorHandler(func(err error) {
-		assert.NoError(t, err)
-	})
 	injector.Instance(func() (Shape, error) {
 		return nil, errors.New("test error")
 	})
@@ -387,6 +447,13 @@ func TestInjector_Resolve_With_UnBounded_Reference_It_Should_Fail(t *testing.T) 
 	injector.Resolve(&s)
 }
 
+type SomeStruct struct {
+	S Shape    `di:"type"`
+	D Database `di:"type"`
+	C Shape    `di:"name"`
+	X string
+}
+
 func TestInjector_Fill_With_Struct_Pointer(t *testing.T) {
 	var injector = NewInjector()
 	injector.SetErrorHandler(func(err error) {
@@ -404,6 +471,10 @@ func TestInjector_Fill_With_Struct_Pointer(t *testing.T) {
 		return &MySQL{}
 	})
 
+	injector.Singleton(func() *SomeStruct {
+		return &SomeStruct{}
+	})
+
 	myApp := struct {
 		S Shape    `di:"type"`
 		D Database `di:"type"`
@@ -415,6 +486,12 @@ func TestInjector_Fill_With_Struct_Pointer(t *testing.T) {
 
 	assert.IsType(t, &Circle{}, myApp.S)
 	assert.IsType(t, &MySQL{}, myApp.D)
+
+	someStruct := Get[*SomeStruct](injector)
+	assert.IsType(t, &Circle{}, someStruct.S)
+	assert.IsType(t, &MySQL{}, someStruct.D)
+	assert.IsType(t, &Circle{}, someStruct.C)
+	assert.Equal(t, 5, someStruct.C.GetArea())
 
 }
 
