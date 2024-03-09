@@ -8,18 +8,11 @@ A simple dependency injection library inspired by [golobby](https://github.com/g
 
 Use `godi@v1.0.0` for go version 1.18+
 
-## `Singletons` vs `Instances` providers
-
-Singleton providers will be executed once and the resulting instance will be shared between all injections. These are ideal for stateless and/or threadsafe constructs. Singleton providers are evaluated _lazily_ which means the provider is not called until the moment of injection.
-
-Instance providers will be executed for each injection and the resulting instances will not shared between injections. These are ideal for stateful or non-threadsafe constructs that should not be shared.
-
 ## `Get` example:
 
 Here we register a singleton provider (called once and the value is shared) to resolve an interface to it's provided the concrete value.
 
-*Note*: the return value of the provider and the argument type passed to `Resolve` must match.
-*Note*: arguments to `Resolve` _must_ be passed by reference (including interfaces and pointers)
+*Note*: the return value of the provider and the argument type passed to `Get` must match exactly. If the provider returns an pointer to a struct rather than an interface, even if that struct fulfils the interface, the lookup for the bindings will fail.
 
 ```go
 injector := di.NewInjector() // or di.GlobalInjector
@@ -91,20 +84,20 @@ type NestedType {
     val int
 }
 
-type ValueType {
+type AnotherType {
     val int
 }
 
 type MyStruct {
     nested *NestedType `di:"type"`
-    value  ValueType   `di:"type"`
+    value  *AnotherType*   `di:"type"`
 }
 
 injector := di.NewInjector() // or di.GlobalInjector
 
 // register an "instance" provider
-injector.Instance(func () ValueType {
-    return NestedType{
+injector.Instance(func () *AnotherType* {
+    return AnotherType{
         val: 12,
     }
 })
@@ -160,6 +153,36 @@ injector.Singleton(func () MyServiceInterface {
 injector.Call(func (svc MyServiceInterface) {
     svc.DoWhatever()
 })
+```
+
+## `Singletons` vs `Instances` providers
+
+Singleton providers will be executed once and the resulting instance will be shared between all injections. These are ideal for stateless and/or threadsafe constructs. Singleton providers are evaluated _lazily_ which means the provider is not called until the moment of injection.
+
+Instance providers will be executed for each injection and the resulting instances will not shared between injections. These are ideal for stateful or non-threadsafe constructs that should not be shared.
+
+## Circular dependencies
+
+`godi` handles circular dependencies for both singleton and instance methods. For singletons the cyclic properties will all point to the same resolved singletonvalues. For cyclic instance instantiation, instances will point to the same resolved values _within the injection call_.
+
+```go
+type A struct {
+    B *B `di:"type"`
+}
+
+type B struct {
+    A *A `di:"type"
+}
+
+injector.Singleton(func () *A {
+    return &A{}
+})
+injector.Instance(func () *B {
+    return &B{}
+})
+
+a := di.Get[*A](injector)
+fmt.Println(a.B.A.B.A.B != nil) // true
 ```
 
 ## Thread safety:

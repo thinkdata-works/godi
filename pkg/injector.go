@@ -39,13 +39,27 @@ type binding struct {
 }
 
 // resolve creates an appropriate implementation of the related abstraction
-func (b *binding) resolve(injector *Injector) (interface{}, error) {
+func (b *binding) resolve(injector *Injector, name string, instantiated map[reflect.Type]map[string]interface{}) (interface{}, error) {
+
+	providerType := reflect.TypeOf(b.provider)
+
 	if injector.isVerbose() {
 		injector.incrementLoggerIndent()
 		defer injector.decrementLoggerIndent()
 
-		functionType := reflect.TypeOf(b.provider)
-		injector.logDebug(fmt.Sprintf("%s: provider for type `%s`", color.MagentaString(resolvingPrefix), color.BlueString(fullyQualifiedTypeString(functionType.Out(0)))))
+		injector.logDebug(fmt.Sprintf("%s: provider for type `%s`", color.MagentaString(resolvingPrefix), color.BlueString(fullyQualifiedTypeString(providerType.Out(0)))))
+	}
+
+	// resolve circular dependencies within a resolution call
+	instances, instantiatedTypeAlready := instantiated[providerType]
+	if !instantiatedTypeAlready {
+		instantiated[providerType] = make(map[string]interface{})
+		instances, _ = instantiated[providerType]
+	}
+
+	instance, instantiatedAlready := instances[name]
+	if instantiatedAlready {
+		return instance, nil
 	}
 
 	if b.btype == Binding_Singleton {
@@ -59,6 +73,7 @@ func (b *binding) resolve(injector *Injector) (interface{}, error) {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		if b.instance == nil {
+
 			if injector.isVerbose() {
 				injector.logDebug(fmt.Sprintf("%s: invoking provider to create singleton instance", color.MagentaString(returningPrefix)))
 			}
@@ -67,13 +82,32 @@ func (b *binding) resolve(injector *Injector) (interface{}, error) {
 			if err != nil {
 				return nil, err
 			}
+
+			instances[name] = instance
+
+			err = injector.fill(instance, instantiated)
+			if err != nil {
+				return nil, err
+			}
+
 			b.instance = instance
 		}
 
 		return b.instance, nil
 	}
 
-	return injector.invoke(b.provider)
+	instance, err := injector.invoke(b.provider)
+	if err != nil {
+		return nil, err
+	}
+
+	instances[name] = instance
+
+	err = injector.fill(instance, instantiated)
+	if err != nil {
+		return nil, err
+	}
+	return instance, nil
 }
 
 type errorHandler func(error)
@@ -206,7 +240,7 @@ func (injector *Injector) logDebug(str string) {
 	}
 }
 
-func (injector *Injector) Get(typ reflect.Type, name string) interface{} {
+func (injector *Injector) get(typ reflect.Type, name string) interface{} {
 
 	concrete, exist := injector.bindings[typ][name]
 	if !exist {
@@ -214,13 +248,7 @@ func (injector *Injector) Get(typ reflect.Type, name string) interface{} {
 		return nil
 	}
 
-	instance, err := concrete.resolve(injector)
-	if err != nil {
-		injector.handleError(err)
-		return nil
-	}
-
-	err = injector.fill(instance)
+	instance, err := concrete.resolve(injector, name, map[reflect.Type]map[string]interface{}{})
 	if err != nil {
 		injector.handleError(err)
 		return nil
@@ -249,8 +277,8 @@ func (injector *Injector) bind(provider interface{}, name string, singleton bool
 		return injector.errorMiddleWare(fmt.Errorf("provider function signature of `%s` is invalid, must return one or two values", fullyQualifiedTypeString(providerType)))
 	}
 
-	if singleton && providerType.Out(0).Kind() != reflect.Ptr && providerType.Out(0).Kind() != reflect.Interface {
-		return injector.errorMiddleWare(fmt.Errorf("singleton provider function signature of `%s` is invalid, must return a pointer or interface type", fullyQualifiedTypeString(providerType)))
+	if providerType.Out(0).Kind() != reflect.Ptr && providerType.Out(0).Kind() != reflect.Interface {
+		return injector.errorMiddleWare(fmt.Errorf("provider function signature of `%s` is invalid, must return a pointer or interface type", fullyQualifiedTypeString(providerType)))
 	}
 
 	for i := 0; i < providerType.NumOut(); i++ {
@@ -366,7 +394,7 @@ func (injector *Injector) arguments(function interface{}) ([]reflect.Value, erro
 			return nil, injector.errorMiddleWare(fmt.Errorf("no provider found for type `%s`", fullyQualifiedTypeString(abstraction)))
 		}
 
-		instance, err := concrete.resolve(injector)
+		instance, err := concrete.resolve(injector, "", map[reflect.Type]map[string]interface{}{})
 		if err != nil {
 			return nil, err
 		}
@@ -490,12 +518,6 @@ func (injector *Injector) Resolve(abstraction interface{}) {
 		injector.handleError(err)
 		return
 	}
-
-	err = injector.fill(abstraction)
-	if err != nil {
-		injector.handleError(err)
-		return
-	}
 }
 
 // NamedResolve resolves like the Resolve method but for named bindings.
@@ -509,12 +531,6 @@ func (injector *Injector) NamedResolve(abstraction interface{}, name string) {
 		injector.handleError(err)
 		return
 	}
-
-	err = injector.fill(abstraction)
-	if err != nil {
-		injector.handleError(err)
-		return
-	}
 }
 
 func fullyQualifiedTypeString(t reflect.Type) string {
@@ -522,7 +538,7 @@ func fullyQualifiedTypeString(t reflect.Type) string {
 	if path == "" {
 		return t.String()
 	}
-	return fmt.Sprintf("%s.%s", path, t.Name())
+	return fmt.Sprintf("%value.%s", path, t.Name())
 }
 
 func (injector *Injector) resolve(abstraction interface{}, name string) error {
@@ -549,7 +565,7 @@ func (injector *Injector) resolve(abstraction interface{}, name string) error {
 		return injector.errorMiddleWare(fmt.Errorf("provider found for argument of type `%s`, but the argument was not passed by reference (i.e Resolve(&arg))", fullyQualifiedTypeString(elem)))
 	}
 
-	instance, err := concrete.resolve(injector)
+	instance, err := concrete.resolve(injector, name, map[reflect.Type]map[string]interface{}{})
 	if err != nil {
 		return err
 	}
@@ -564,40 +580,37 @@ func (injector *Injector) Fill(structure interface{}) {
 		injector.logDebug(fmt.Sprintf("%s%s%s", color.CyanString("Fill("), color.BlueString(debugNameString(structure)), color.CyanString(")")))
 	}
 
-	err := injector.fill(structure)
+	err := injector.fill(structure, map[reflect.Type]map[string]interface{}{})
 	if err != nil {
 		injector.handleError(err)
+		return
 	}
 }
 
-func (injector *Injector) fill(structure interface{}) error {
+func (injector *Injector) fill(structure interface{}, instantiated map[reflect.Type]map[string]interface{}) error {
 	receiverType := reflect.TypeOf(structure)
 	if receiverType == nil {
 		return injector.errorMiddleWare(fmt.Errorf("invalid struct argument `%v`", structure))
 	}
 
-	if receiverType.Kind() != reflect.Ptr {
-		return injector.errorMiddleWare(fmt.Errorf("argument of type `%s` is not a pointer", fullyQualifiedTypeString(receiverType)))
+	if receiverType.Kind() != reflect.Ptr && receiverType.Elem().Kind() != reflect.Interface {
+		return injector.errorMiddleWare(fmt.Errorf("argument of type `%s` is not a pointer or interface", fullyQualifiedTypeString(receiverType)))
 	}
 
-	var s reflect.Value
-
 	// Allow passing structs by pointer values or pointer references i.e support both Fill(myPtr) and Fill(&myPtr)
-	elem := receiverType.Elem()
-	if elem.Kind() != reflect.Struct {
-		if elem.Kind() == reflect.Ptr {
-			elem = elem.Elem()
-			if elem.Kind() != reflect.Struct {
-				return injector.errorMiddleWare(fmt.Errorf("argument `%+v` of type `%s` is not a struct", structure, fullyQualifiedTypeString(receiverType)))
-			}
-			s = reflect.ValueOf(structure).Elem().Elem()
-		} else if elem.Kind() == reflect.Interface {
-			s = reflect.ValueOf(structure).Elem().Elem().Elem()
-		} else {
-			return injector.errorMiddleWare(fmt.Errorf("argument of `%+v` of type `%s` is not a struct", structure, fullyQualifiedTypeString(receiverType)))
+
+	// Continue to unwrap the value until we have the underlying struct value
+	value := reflect.ValueOf(structure)
+	maxUnwrapAttempts := 4
+	for i := 0; i < maxUnwrapAttempts; i++ {
+		if value.Kind() == reflect.Ptr || value.Kind() == reflect.Interface {
+			value = value.Elem()
 		}
-	} else {
-		s = reflect.ValueOf(structure).Elem()
+	}
+
+	// If the underlying type is not a struct, error
+	if value.Kind() != reflect.Struct {
+		return injector.errorMiddleWare(fmt.Errorf("argument of type `%s` is not a struct", value.Type()))
 	}
 
 	if injector.isVerbose() {
@@ -605,10 +618,10 @@ func (injector *Injector) fill(structure interface{}) error {
 		defer injector.decrementLoggerIndent()
 	}
 
-	for i := 0; i < s.NumField(); i++ {
-		f := s.Field(i)
+	for i := 0; i < value.NumField(); i++ {
+		f := value.Field(i)
 
-		t, exist := s.Type().Field(i).Tag.Lookup(tagName)
+		t, exist := value.Type().Field(i).Tag.Lookup(tagName)
 		if !exist {
 			// field has no tag
 			continue
@@ -618,32 +631,37 @@ func (injector *Injector) fill(structure interface{}) error {
 
 		if t == injectByType {
 			if injector.isVerbose() {
-				injector.logDebug(fmt.Sprintf("%s: field `%s %s` by type", color.MagentaString(fillingPrefix), color.BlueString(s.Type().Field(i).Name), color.GreenString(fullyQualifiedTypeString(s.Type().Field(i).Type))))
+				injector.logDebug(fmt.Sprintf("%s: field `%s %s` by type", color.MagentaString(fillingPrefix), color.BlueString(value.Type().Field(i).Name), color.GreenString(fullyQualifiedTypeString(value.Type().Field(i).Type))))
 			}
 			name = ""
 		} else if t == injectByName {
 			if injector.isVerbose() {
-				injector.logDebug(fmt.Sprintf("%s: field `%s %s` by name", color.MagentaString(fillingPrefix), color.BlueString(s.Type().Field(i).Name), color.GreenString(fullyQualifiedTypeString(s.Type().Field(i).Type))))
+				injector.logDebug(fmt.Sprintf("%s: field `%s %s` by name", color.MagentaString(fillingPrefix), color.BlueString(value.Type().Field(i).Name), color.GreenString(fullyQualifiedTypeString(value.Type().Field(i).Type))))
 			}
-			name = s.Type().Field(i).Name
+			name = value.Type().Field(i).Name
 		} else {
-			return injector.errorMiddleWare(fmt.Errorf("field `%s` has an invalid struct tag `%s`", s.Type().Field(i).Name, t))
+			return injector.errorMiddleWare(fmt.Errorf("field `%s` has an invalid struct tag `%s`", value.Type().Field(i).Name, t))
 		}
 
 		concrete, exist := injector.bindings[f.Type()][name]
 		if !exist {
-			return injector.errorMiddleWare(fmt.Errorf("cannot resolve field `%s %s`, no provider exists for type `%s` under name: `%s` ", s.Type().Field(i).Name, fullyQualifiedTypeString(s.Type().Field(i).Type), fullyQualifiedTypeString(s.Type().Field(i).Type), s.Type().Field(i).Name))
+			return injector.errorMiddleWare(fmt.Errorf("cannot resolve field `%s %s`, no provider exists for type `%s` under name: `%s` ", value.Type().Field(i).Name, fullyQualifiedTypeString(value.Type().Field(i).Type), fullyQualifiedTypeString(value.Type().Field(i).Type), value.Type().Field(i).Name))
 		}
-		instance, err := concrete.resolve(injector)
+		instance, err := concrete.resolve(injector, name, instantiated)
 		if err != nil {
 			injector.handleError(err)
 		}
 
-		ptr := reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
-		ptr.Set(reflect.ValueOf(instance))
-
-		// recursively fill the field if it's a struct
-		injector.fill(instance)
+		if f.CanAddr() {
+			ptr := reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
+			ptr.Set(reflect.ValueOf(instance))
+		} else {
+			if f.CanSet() {
+				f.Set(reflect.ValueOf(instance))
+			} else {
+				return injector.errorMiddleWare(fmt.Errorf("field `%s %s` is not an addressible or settable field, must be a pointer or inteface type", value.Type().Field(i).Name, fullyQualifiedTypeString(value.Type().Field(i).Type)))
+			}
+		}
 	}
 
 	return nil
