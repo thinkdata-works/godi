@@ -79,20 +79,32 @@ func Fill(receiver interface{}) {
 	GlobalInjector.Fill(receiver)
 }
 
+// Get takes a pointer or interface type argument and returns the provided implemenation.
 func Get[Type any](i *Injector) Type {
 	defer func() {
 		if r := recover(); r != nil {
 			i.handleError(fmt.Errorf("unable to resolve %s, returning empty value", reflect.TypeFor[Type]().String()))
 		}
 	}()
-	return i.Get(reflect.TypeFor[Type](), "").(Type)
+
+	if reflect.TypeFor[Type]().Kind() != reflect.Interface && reflect.TypeFor[Type]().Kind() != reflect.Ptr {
+		i.handleError(fmt.Errorf("unable to resolve %s, type must be either a pointer or an interface, not: %s", reflect.TypeFor[Type]().String(), reflect.TypeFor[Type]().Kind()))
+	}
+
+	return i.get(reflect.TypeFor[Type](), "").(Type)
 }
 
+// NamedGet takes a pointer or interface type argument and a name string and returns the provided implemenation.
 func NamedGet[Type any](i *Injector, name string) Type {
 	defer func() {
 		if r := recover(); r != nil {
 			i.handleError(fmt.Errorf("unable to resolve %s, returning empty value", reflect.TypeFor[Type]().String()))
 		}
 	}()
-	return i.Get(reflect.TypeFor[Type](), name).(Type)
+
+	if reflect.TypeFor[Type]().Kind() != reflect.Interface && reflect.TypeFor[Type]().Kind() != reflect.Ptr {
+		i.handleError(fmt.Errorf("unable to resolve %s, type must be either a pointer or an interface, not: %s", reflect.TypeFor[Type]().String(), reflect.TypeFor[Type]().Kind()))
+	}
+
+	return i.get(reflect.TypeFor[Type](), name).(Type)
 }

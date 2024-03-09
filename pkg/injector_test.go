@@ -30,7 +30,7 @@ type TypeC struct {
 }
 
 type TypeB struct {
-	c TypeC `di:"type"`
+	c *TypeC `di:"type"`
 }
 
 type TypeA struct {
@@ -71,6 +71,9 @@ func TestInjector_Singleton(t *testing.T) {
 	})
 	injector.Singleton(func() (Shape, error) {
 		return &Circle{a: 13}, nil
+	})
+	injector.Singleton(func() *TypeC {
+		return &TypeC{}
 	})
 	injector.Singleton(func() *TypeB {
 		return &TypeB{}
@@ -151,6 +154,294 @@ func TestInjector_Singleton_Fill(t *testing.T) {
 	var sh Shape
 	injector.Resolve(&sh)
 	assert.Equal(t, 13, sh.GetArea())
+}
+
+type John struct {
+	Val int
+}
+
+type Alice struct {
+	Bob  *Bob  `di:"type"`
+	John *John `di:"type"`
+}
+
+type Bob struct {
+	Alice *Alice `di:"type"`
+	John  *John  `di:"type"`
+}
+
+func TestInjector_Circular_Deps_Singleton(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+
+	injector.Singleton(func() *Alice {
+		return &Alice{}
+	})
+	injector.Singleton(func() *Bob {
+		return &Bob{}
+	})
+	injector.Singleton(func() *John {
+		return &John{Val: 42}
+	})
+
+	alice := Get[*Alice](injector)
+	assert.NotNil(t, alice)
+	assert.NotNil(t, alice.John)
+	assert.Equal(t, 42, alice.John.Val)
+	assert.NotNil(t, alice.Bob)
+	assert.NotNil(t, alice.Bob.John)
+	assert.Equal(t, 42, alice.Bob.John.Val)
+	assert.NotNil(t, alice.Bob.Alice)
+	assert.NotNil(t, alice.Bob.Alice.John)
+	assert.Equal(t, 42, alice.Bob.Alice.John.Val)
+	assert.NotNil(t, alice.Bob.Alice.Bob)
+	assert.NotNil(t, alice.Bob.Alice.Bob.John)
+	assert.Equal(t, 42, alice.Bob.Alice.Bob.John.Val)
+	assert.NotNil(t, alice.Bob.Alice.Bob.Alice)
+	assert.NotNil(t, alice.Bob.Alice.Bob.Alice.John)
+	assert.Equal(t, 42, alice.Bob.Alice.Bob.Alice.John.Val)
+	// to infinity and beyond
+}
+
+func TestInjector_Circular_Deps_Singleton_Call(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+
+	injector.Singleton(func() *Alice {
+		return &Alice{}
+	})
+	injector.Singleton(func() *Bob {
+		return &Bob{}
+	})
+	injector.Singleton(func() *John {
+		return &John{Val: 42}
+	})
+
+	injector.Call(func(alice *Alice) {
+		assert.NotNil(t, alice)
+		assert.NotNil(t, alice.John)
+		assert.Equal(t, 42, alice.John.Val)
+		assert.NotNil(t, alice.Bob)
+		assert.NotNil(t, alice.Bob.John)
+		assert.Equal(t, 42, alice.Bob.John.Val)
+		assert.NotNil(t, alice.Bob.Alice)
+		assert.NotNil(t, alice.Bob.Alice.John)
+		assert.Equal(t, 42, alice.Bob.Alice.John.Val)
+		assert.NotNil(t, alice.Bob.Alice.Bob)
+		assert.NotNil(t, alice.Bob.Alice.Bob.John)
+		assert.Equal(t, 42, alice.Bob.Alice.Bob.John.Val)
+		assert.NotNil(t, alice.Bob.Alice.Bob.Alice)
+		assert.NotNil(t, alice.Bob.Alice.Bob.Alice.John)
+		assert.Equal(t, 42, alice.Bob.Alice.Bob.Alice.John.Val)
+		// to infinity and beyond
+	})
+}
+
+func TestInjector_Circular_Deps_Instance(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+
+	injector.Instance(func() *Alice {
+		return &Alice{}
+	})
+	injector.Instance(func() *Bob {
+		return &Bob{}
+	})
+	injector.Instance(func() *John {
+		return &John{Val: 42}
+	})
+
+	alice := Get[*Alice](injector)
+	assert.NotNil(t, alice)
+	assert.NotNil(t, alice.John)
+	assert.Equal(t, 42, alice.John.Val)
+	assert.NotNil(t, alice.Bob)
+	assert.NotNil(t, alice.Bob.John)
+	assert.Equal(t, 42, alice.Bob.John.Val)
+	assert.NotNil(t, alice.Bob.Alice)
+	assert.NotNil(t, alice.Bob.Alice.John)
+	assert.Equal(t, 42, alice.Bob.Alice.John.Val)
+	assert.NotNil(t, alice.Bob.Alice.Bob)
+	assert.NotNil(t, alice.Bob.Alice.Bob.John)
+	assert.Equal(t, 42, alice.Bob.Alice.Bob.John.Val)
+	assert.NotNil(t, alice.Bob.Alice.Bob.Alice)
+	assert.NotNil(t, alice.Bob.Alice.Bob.Alice.John)
+	assert.Equal(t, 42, alice.Bob.Alice.Bob.Alice.John.Val)
+	// to infinity and beyond
+}
+
+func TestInjector_Circular_Deps_Instance_Call(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+
+	injector.Instance(func() *Alice {
+		return &Alice{}
+	})
+	injector.Instance(func() *Bob {
+		return &Bob{}
+	})
+	injector.Instance(func() *John {
+		return &John{Val: 42}
+	})
+
+	injector.Call(func(alice *Alice) {
+		assert.NotNil(t, alice)
+		assert.NotNil(t, alice.John)
+		assert.Equal(t, 42, alice.John.Val)
+		assert.NotNil(t, alice.Bob)
+		assert.NotNil(t, alice.Bob.John)
+		assert.Equal(t, 42, alice.Bob.John.Val)
+		assert.NotNil(t, alice.Bob.Alice)
+		assert.NotNil(t, alice.Bob.Alice.John)
+		assert.Equal(t, 42, alice.Bob.Alice.John.Val)
+		assert.NotNil(t, alice.Bob.Alice.Bob)
+		assert.NotNil(t, alice.Bob.Alice.Bob.John)
+		assert.Equal(t, 42, alice.Bob.Alice.Bob.John.Val)
+		assert.NotNil(t, alice.Bob.Alice.Bob.Alice)
+		assert.NotNil(t, alice.Bob.Alice.Bob.Alice.John)
+		assert.Equal(t, 42, alice.Bob.Alice.Bob.Alice.John.Val)
+		// to infinity and beyond
+	})
+}
+
+func TestInjector_Mix_Singleton_Instance_Recursive(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+
+	injector.Singleton(func() *Alice {
+		return &Alice{}
+	})
+	injector.Instance(func() *Bob {
+		return &Bob{}
+	})
+	injector.Singleton(func() *John {
+		return &John{Val: 42}
+	})
+
+	alice := Get[*Alice](injector)
+	assert.NotNil(t, alice)
+	assert.NotNil(t, alice.John)
+	assert.Equal(t, 42, alice.John.Val)
+	assert.NotNil(t, alice.Bob)
+	assert.NotNil(t, alice.Bob.John)
+	assert.Equal(t, 42, alice.Bob.John.Val)
+	assert.NotNil(t, alice.Bob.Alice)
+	assert.NotNil(t, alice.Bob.Alice.John)
+	assert.Equal(t, 42, alice.Bob.Alice.John.Val)
+	assert.NotNil(t, alice.Bob.Alice.Bob)
+	assert.NotNil(t, alice.Bob.Alice.Bob.John)
+	assert.Equal(t, 42, alice.Bob.Alice.Bob.John.Val)
+	assert.NotNil(t, alice.Bob.Alice.Bob.Alice)
+	assert.NotNil(t, alice.Bob.Alice.Bob.Alice.John)
+	assert.Equal(t, 42, alice.Bob.Alice.Bob.Alice.John.Val)
+	// to infinity and beyond
+}
+
+type Partner struct {
+	Name   string
+	Robert *Robert `di:"type"`
+}
+
+type Robert struct {
+	Dale  *Partner `di:"name"`
+	Peter *Partner `di:"name"`
+}
+
+func TestInjector_NamedSingletons_Resursive(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.NamedSingleton("Dale", func() *Partner {
+		return &Partner{Name: "dale"}
+	})
+	injector.NamedSingleton("Peter", func() *Partner {
+		return &Partner{Name: "peter"}
+	})
+	injector.Singleton(func() *Robert {
+		return &Robert{}
+	})
+
+	robert := Get[*Robert](injector)
+	assert.NotNil(t, robert)
+	assert.NotNil(t, robert.Dale)
+	assert.NotNil(t, robert.Peter)
+	assert.Equal(t, "dale", robert.Dale.Name)
+	assert.Equal(t, "peter", robert.Peter.Name)
+	assert.NotNil(t, robert.Dale.Robert)
+	assert.NotNil(t, robert.Peter.Robert)
+	assert.NotNil(t, robert.Dale.Robert.Peter)
+	assert.NotNil(t, robert.Dale.Robert.Dale)
+	assert.NotNil(t, robert.Peter.Robert.Peter)
+	assert.NotNil(t, robert.Dale.Robert.Dale)
+}
+
+func TestInjector_NamedInstances_Resursive(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.NamedInstance("Dale", func() *Partner {
+		return &Partner{Name: "dale"}
+	})
+	injector.NamedInstance("Peter", func() *Partner {
+		return &Partner{Name: "peter"}
+	})
+	injector.Singleton(func() *Robert {
+		return &Robert{}
+	})
+
+	robert := Get[*Robert](injector)
+	assert.NotNil(t, robert)
+	assert.NotNil(t, robert.Dale)
+	assert.NotNil(t, robert.Peter)
+	assert.Equal(t, "dale", robert.Dale.Name)
+	assert.Equal(t, "peter", robert.Peter.Name)
+	assert.NotNil(t, robert.Dale.Robert)
+	assert.NotNil(t, robert.Peter.Robert)
+	assert.NotNil(t, robert.Dale.Robert.Peter)
+	assert.NotNil(t, robert.Dale.Robert.Dale)
+	assert.NotNil(t, robert.Peter.Robert.Peter)
+	assert.NotNil(t, robert.Dale.Robert.Dale)
+}
+
+func TestInjector_NamedInstances_NamedSingleton_Mix_Resursive(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+	injector.NamedInstance("Dale", func() *Partner {
+		return &Partner{Name: "dale"}
+	})
+	injector.NamedSingleton("Peter", func() *Partner {
+		return &Partner{Name: "peter"}
+	})
+	injector.Singleton(func() *Robert {
+		return &Robert{}
+	})
+
+	robert := Get[*Robert](injector)
+	assert.NotNil(t, robert)
+	assert.NotNil(t, robert.Dale)
+	assert.NotNil(t, robert.Peter)
+	assert.Equal(t, "dale", robert.Dale.Name)
+	assert.Equal(t, "peter", robert.Peter.Name)
+	assert.NotNil(t, robert.Dale.Robert)
+	assert.NotNil(t, robert.Peter.Robert)
+	assert.NotNil(t, robert.Dale.Robert.Peter)
+	assert.NotNil(t, robert.Dale.Robert.Dale)
+	assert.NotNil(t, robert.Peter.Robert.Peter)
+	assert.NotNil(t, robert.Dale.Robert.Dale)
 }
 
 func TestInjector_NamedSingleton(t *testing.T) {
@@ -241,18 +532,14 @@ func TestInjector_Instance(t *testing.T) {
 		assert.Equal(t, 42, a)
 	})
 
-	injector.Instance(func() TypeC {
-		return TypeC{val: 42}
+	injector.Instance(func() *TypeC {
+		return &TypeC{val: 42}
 	})
 	injector.Instance(func() *TypeB {
-		b := &TypeB{}
-		injector.Fill(&b)
-		return b
+		return &TypeB{}
 	})
 	injector.Instance(func() *TypeA {
-		a := &TypeA{}
-		injector.Fill(&a)
-		return a
+		return &TypeA{}
 	})
 	injector.Call(func(a *TypeA) {
 		assert.NotNil(t, a)
@@ -263,18 +550,14 @@ func TestInjector_Instance(t *testing.T) {
 	})
 
 	injector.Reset()
-	injector.Instance(func() TypeC {
-		return TypeC{val: 42}
+	injector.Instance(func() *TypeC {
+		return &TypeC{val: 42}
 	})
 	injector.Instance(func() *TypeB {
-		t := &TypeB{}
-		injector.Fill(t)
-		return t
+		return &TypeB{}
 	})
 	injector.Instance(func() (*TypeA, error) {
-		t := &TypeA{}
-		injector.Fill(t)
-		return t, nil
+		return &TypeA{}, nil
 	})
 	a := &TypeA{}
 	injector.Resolve(&a)
@@ -495,31 +778,20 @@ func TestInjector_Fill_With_Struct_Pointer(t *testing.T) {
 
 }
 
-func TestInjector_Fill_With_Struct_Value(t *testing.T) {
+func TestInjector_Register_With_Struct_Value_Should_Error(t *testing.T) {
 	var injector = NewInjector()
 	injector.SetErrorHandler(func(err error) {
-		assert.NoError(t, err)
+		assert.Error(t, err)
 	})
 	injector.Instance(func() ValueC {
 		return ValueC{val: 5}
 	})
 	injector.Instance(func() ValueB {
-		b := ValueB{}
-		injector.Fill(&b)
-		return b
+		return ValueB{}
 	})
 	injector.Instance(func() ValueA {
-		a := ValueA{}
-		injector.Fill(&a)
-		return a
+		return ValueA{}
 	})
-
-	struc := struct {
-		a ValueA `di:"type"`
-	}{}
-	injector.Fill(&struc)
-	assert.EqualValues(t, struc.a.b.c.val, 5)
-
 }
 
 func TestInjector_Fill_Unexported_With_Struct_Pointer(t *testing.T) {
@@ -546,18 +818,14 @@ func TestInjector_Fill_Unexported_With_Struct_Pointer(t *testing.T) {
 	assert.IsType(t, &Circle{}, myApp.s)
 	assert.IsType(t, &MySQL{}, myApp.d)
 
-	injector.Instance(func() TypeC {
-		return TypeC{val: 42}
+	injector.Instance(func() *TypeC {
+		return &TypeC{val: 42}
 	})
 	injector.Instance(func() *TypeB {
-		t := &TypeB{}
-		injector.Fill(t)
-		return t
+		return &TypeB{}
 	})
 	injector.Instance(func() *TypeA {
-		t := &TypeA{}
-		injector.Fill(t)
-		return t
+		return &TypeA{}
 	})
 
 	// Should accept pointer
@@ -623,8 +891,8 @@ func TestInjector_Fill_With_Invalid_Field_Name_It_Should_Fail(t *testing.T) {
 	injector.SetErrorHandler(func(err error) {
 		assert.NoError(t, err)
 	})
-	injector.NamedInstance("C", func() TypeC {
-		return TypeC{val: 42}
+	injector.NamedInstance("C", func() *TypeC {
+		return &TypeC{val: 42}
 	})
 	type App struct {
 		S TypeC `di:"name"`
