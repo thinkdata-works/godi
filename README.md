@@ -2,6 +2,10 @@
 
 A simple dependency injection library inspired by [golobby](https://github.com/golobby/container)
 
+## Requirements
+
+`godi` requires go version 1.22 because it uses the newly added `reflect.TypeFor[T]`.
+
 ## `Singletons` vs `Instances` providers
 
 Singleton providers will be executed once and the resulting instance will be shared between all injections. These are ideal for stateless and/or threadsafe constructs. Singleton providers are evaluated _lazily_ which means the provider is not called until the moment of injection.
