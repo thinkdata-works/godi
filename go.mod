@@ -1,4 +1,4 @@
-module github.com/thinkdata-works/godi/v2
+module github.com/thinkdata-works/godi
 
 go 1.22.0
 

@@ -4,9 +4,7 @@ A simple dependency injection library inspired by [golobby](https://github.com/g
 
 ## Requirements
 
-`godi@v2.x.x` requires go version 1.22 because it uses the newly added `reflect.TypeFor[T]`.
-
-Use `godi@v1.0.0` for go version 1.18+
+`godi` requires go version 1.22 because it uses the newly added `reflect.TypeFor[T]`.
 
 ## `Get` example:
 
