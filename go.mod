@@ -1,6 +1,6 @@
 module github.com/thinkdata-works/godi
 
-go 1.18.0
+go 1.22.0
 
 require github.com/fatih/color v1.16.0
 
