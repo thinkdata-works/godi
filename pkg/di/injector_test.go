@@ -165,9 +165,42 @@ type Alice struct {
 	John *John `di:"type"`
 }
 
+func NewAlice(i *Injector) *Alice {
+	a := &Alice{}
+	i.Fill(&a)
+	return a
+}
+
 type Bob struct {
 	Alice *Alice `di:"type"`
 	John  *John  `di:"type"`
+}
+
+func NewBob(i *Injector) *Bob {
+	b := &Bob{}
+	i.Fill(&b)
+	return b
+}
+
+func TestInjector_LoopedConstructor(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+
+	injector.Instance(func() *Alice {
+		return NewAlice(injector)
+	}).Instance(func() *Bob {
+		return NewBob(injector)
+	})
+
+	alice := Get[*Alice](injector)
+	assert.NotNil(t, alice)
+	assert.NotNil(t, alice.Bob)
+
+	bob := Get[*Bob](injector)
+	assert.NotNil(t, bob)
+	assert.NotNil(t, bob.Alice)
 }
 
 func TestInjector_Circular_Deps_Singleton(t *testing.T) {
