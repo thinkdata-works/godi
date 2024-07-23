@@ -197,10 +197,44 @@ func TestInjector_LoopedConstructor(t *testing.T) {
 	alice := Get[*Alice](injector)
 	assert.NotNil(t, alice)
 	assert.NotNil(t, alice.Bob)
+	assert.NotNil(t, alice.Bob.Alice)
 
 	bob := Get[*Bob](injector)
 	assert.NotNil(t, bob)
 	assert.NotNil(t, bob.Alice)
+}
+
+func TestInjector_LoopedInstance(t *testing.T) {
+	var injector = NewInjector()
+	injector.SetErrorHandler(func(err error) {
+		assert.NoError(t, err)
+	})
+
+	injector.Instance(func() *Alice {
+		return &Alice{}
+	}).Instance(func() *Bob {
+		return &Bob{}
+	}).Instance(func() *John {
+		return &John{Val: 42}
+	})
+
+	injector.EnableDebugLogging()
+
+	alice := Get[*Alice](injector)
+	assert.NotNil(t, alice)
+	assert.NotNil(t, alice.Bob)
+	assert.NotNil(t, alice.John)
+	assert.NotNil(t, alice.Bob.John)
+	assert.NotNil(t, alice.Bob.Alice.John)
+
+	bob := Get[*Bob](injector)
+	assert.NotNil(t, bob)
+	assert.NotNil(t, bob.Alice)
+	assert.NotNil(t, bob.John)
+
+	john := Get[*John](injector)
+	assert.NotNil(t, john)
+	assert.Equal(t, 42, john.Val)
 }
 
 func TestInjector_Circular_Deps_Singleton(t *testing.T) {

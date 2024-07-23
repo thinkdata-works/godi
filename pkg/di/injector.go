@@ -40,7 +40,6 @@ type binding struct {
 
 // resolve creates an appropriate implementation of the related abstraction
 func (b *binding) resolve(injector *Injector, name string, instantiated map[reflect.Type]map[string]interface{}) (interface{}, error) {
-
 	providerType := reflect.TypeOf(b.provider)
 
 	if injector.isVerbose() {
